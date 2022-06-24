@@ -1,13 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-
-using Google.Ads.GoogleAds;
+﻿using Google.Ads.GoogleAds;
 using Google.Ads.GoogleAds.Config;
 using Google.Ads.GoogleAds.Lib;
 using Google.Ads.GoogleAds.Util;
@@ -19,6 +10,14 @@ using Google.Apis.Util.Store;
 
 using Newtonsoft.Json;
 
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
 using static Google.Ads.GoogleAds.V11.Enums.KeywordPlanForecastIntervalEnum.Types;
 
 namespace HystericalMetrics
@@ -29,12 +28,16 @@ namespace HystericalMetrics
 
         static void Main(string[] args)
         {
+            TraceUtilities.Configure(TraceUtilities.DETAILED_REQUEST_LOGS_SOURCE,
+                                     Path.Combine(Path.GetTempPath(), $"GoogleTrace_{DateTime.UtcNow:yyyy'-'MM'-'dd'-'HH'-'mm'-'ss'-'ffff}.log"),
+                                     SourceLevels.All);
+
             var credCFG = (from file in Directory.GetFiles(@"C:\users\bugma\Credentials", "*.cfg") where file.Contains("trev") select file).FirstOrDefault();
             var credJSN = Path.ChangeExtension(credCFG, ".json");
             var devToken = (from line in File.ReadAllLines(credCFG) where line.StartsWith("developer.token") select line.Substring(16)).FirstOrDefault();
             var (adsClient, credential) = AuthoriseFromCFG(credCFG, "7212153394");
             CustomerServiceClient customerService = adsClient.GetService(Services.V11.CustomerService);
-            foreach (var (clientid, text) in from long clientid in new long[]
+            foreach (long clientid in new long[]
             {
                 1193902583,
                 1347140419,
@@ -132,20 +135,20 @@ namespace HystericalMetrics
                 9685755031,
                 9884395947,
                 9968631413
-            }
-                                             let text = Path.Combine(Path.GetTempPath(), $"GoogleTrace_{DateTime.UtcNow:yyyy'-'MM'-'dd'-'HH'-'mm'-'ss'-'ffff}_{clientid}.log")
-                                             select (clientid, text))
+            })
             {
-                TraceUtilities.Configure(TraceUtilities.DETAILED_REQUEST_LOGS_SOURCE, text, SourceLevels.All);
-                var (customer, exception) = GetAccountInformation(adsClient, clientid);
-                if (customer != null)
+                var (customer, exc1) = GetAccountInformation(adsClient, clientid);
+                if (exc1 == null)
                 {
                     Console.WriteLine($"{clientid} {customer.DescriptiveName}");
-                    var plan = CreateKeywordPlan(adsClient, clientid);
-                    Console.WriteLine(plan);
-                    var (metrics, exc) = GenerateHistoricalMetrics(adsClient, clientid, plan);
-                    if (exc == null)
-                        Console.WriteLine(metrics);
+                    var (plan, exc2) = CreateKeywordPlan(adsClient, clientid);
+                    if (exc2 == null)
+                    {
+                        Console.WriteLine(plan);
+                        var (metrics, exc3) = GenerateHistoricalMetrics(adsClient, clientid, plan);
+                        if (exc3 == null)
+                            Console.WriteLine(metrics);
+                    }
                 }
             }
         }
@@ -216,7 +219,7 @@ namespace HystericalMetrics
             return (client, credential);
         }
 
-        private static string CreateKeywordPlan(GoogleAdsClient client, long customerId)
+        private static (string plan, GoogleAdsException exception) CreateKeywordPlan(GoogleAdsClient client, long customerId)
         {
             // Get the KeywordPlanService.
             KeywordPlanServiceClient serviceClient = client.GetService(
@@ -238,12 +241,19 @@ namespace HystericalMetrics
             };
 
             // Add the keyword plan.
-            MutateKeywordPlansResponse response = serviceClient.MutateKeywordPlans(
-                customerId.ToString(), new KeywordPlanOperation[] { operation });
-
+            MutateKeywordPlansResponse response;
+            try
+            {
+                response = serviceClient.MutateKeywordPlans(
+                   customerId.ToString(), new KeywordPlanOperation[] { operation });
+            }
+            catch (GoogleAdsException e)
+            {
+                return (null, e);
+            }
             // Display the results.
             String planResource = response.Results[0].ResourceName;
-            return planResource;
+            return (planResource, null);
         }
 
         private static (Customer customer, GoogleAdsException exception) GetAccountInformation(GoogleAdsClient client, long customerId)
